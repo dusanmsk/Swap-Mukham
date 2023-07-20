@@ -188,6 +188,8 @@ def process(
     total_exec_time = lambda start_time: divmod(time.time() - start_time, 60)
     get_finsh_text = lambda start_time: f"✔️ Completed in {int(total_exec_time(start_time)[0])} min {int(total_exec_time(start_time)[1])} sec."
 
+    print (locals())
+
     ## ------------------------------ PREPARE INPUTS & LOAD MODELS ------------------------------
     yield "### \n ⌛ Loading NSFW detector model...", *ui_before()
     load_nsfw_detector_model()
@@ -218,14 +220,14 @@ def process(
     ## ------------------------------ ANALYSE & SWAP FUNC ------------------------------
 
     def swap_process(image_sequence):
-        yield "### \n ⌛ Checking contents...", *ui_before()
-        nsfw = NSFW_DETECTOR.is_nsfw(image_sequence)
-        if nsfw:
-            message = "NSFW Content detected !!!"
-            yield f"### \n 🔞 {message}", *ui_before()
-            assert not nsfw, message
-            return False
-        EMPTY_CACHE()
+        #yield "### \n ⌛ Checking contents...", *ui_before()
+        # nsfw = NSFW_DETECTOR.is_nsfw(image_sequence)
+        # if nsfw:
+        #     message = "NSFW Content detected !!!"
+        #     yield f"### \n 🔞 {message}", *ui_before()
+        #     assert not nsfw, message
+        #     return False
+        # EMPTY_CACHE()
 
         yield "### \n ⌛ Analysing face data...", *ui_before()
         if condition != "Specific Face":
