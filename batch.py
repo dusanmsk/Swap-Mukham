@@ -30,11 +30,12 @@ parser = argparse.ArgumentParser(description="Swap-Mukham Face Swapper")
 parser.add_argument("--out_dir", help="Default Output directory", default=os.getcwd())
 parser.add_argument("--batch_size", help="Gpu batch size", default=32)
 parser.add_argument("--cuda", action="store_true", help="Enable cuda", default=False)
-parser.add_argument("--batch", action="store_true", help="Run in headless batch mode", default=False)
+parser.add_argument("--project", help="Project dir to run in headless batch mode")
 parser.add_argument(
     "--colab", action="store_true", help="Enable colab mode", default=False
 )
 user_args = parser.parse_args()
+print(user_args)
 
 ## ------------------------------ DEFAULTS ------------------------------
 
@@ -42,7 +43,7 @@ USE_COLAB = user_args.colab
 USE_CUDA = user_args.cuda
 DEF_OUTPUT_PATH = user_args.out_dir
 BATCH_SIZE = user_args.batch_size
-BATCH_MODE = user_args.batch
+PROJECT_DIR = user_args.project
 WORKSPACE = None
 OUTPUT_FILE = None
 CURRENT_FRAME = None
@@ -377,16 +378,26 @@ def stop_running():
         STREAMER = None
     return "Cancelled"
 
-with gr.Blocks() as demo:
-    greet_btn = gr.Button("Greet")
-    greet_btn.click(fn=process, inputs=None, outputs=None, api_name="greet")
+# with gr.Blocks() as demo:
+#     greet_btn = gr.Button("Greet")
+#     greet_btn.click(fn=process, inputs=None, outputs=None, api_name="greet")
+
+def fixProjectPaths(p):
+    for i in ['video_path', 'source_path', 'output_path']:
+        if not os.path.isabs(p[i]):
+            p[i] = os.path.join(PROJECT_DIR, p[i])
+    return p
 
 
 if __name__ == "__main__":
-    #if BATCH_MODE:
-    print("Running batch mode")
-    with open('project.json', 'r') as openfile:
+    print("Running project ${PROJECT_DIR} in batch mode")
+
+    # read project file
+    with open(os.path.join(PROJECT_DIR, 'project.json'), 'r') as openfile:
        project = json.load(openfile)
+
+    project = fixProjectPaths(project)
+    print("Running project: " + json.dumps(project, indent=4, sort_keys=True))
 
     for i in process(
         input_type = project['input_type'],
