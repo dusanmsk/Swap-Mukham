@@ -1,0 +1,12 @@
+FROM continuumio/miniconda3
+
+
+WORKDIR /app
+COPY app /app
+COPY setup_cpu.sh /app
+
+RUN /bin/bash /app/setup_cpu.sh
+
+#RUN yarn install --production
+#CMD ["node", "src/index.js"]
+#EXPOSE 3000

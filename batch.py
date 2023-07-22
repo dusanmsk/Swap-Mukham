@@ -15,6 +15,7 @@ import gradio as gr
 from tqdm import tqdm
 import concurrent.futures
 from moviepy.editor import VideoFileClip
+import json
 
 from nsfw_detector import get_nsfw_detector
 from face_swapper import Inswapper, paste_to_whole, place_foreground_on_background
@@ -160,32 +161,6 @@ def process(
     global OUTPUT_FILE
     global PREVIEW
     WORKSPACE, OUTPUT_FILE, PREVIEW = None, None, None
-    print("process start 2")
-    input_type = "Video"
-    video_path = '/home/msk/encfs/faceswap/projects/test1/src-short.webm'
-    image_path = ''
-    source_path = '/home/msk/encfs/faceswap/projects/test1/dst.jpg'
-    directory_path = ''
-    output_path = '/home/msk/encfs/out'
-    output_name = 'Result'
-    keep_output_sequence = False
-    mask_includes = ['Skin', 'R-Eyebrow', 'L-Eyebrow', 'L-Eye', 'R-Eye', 'Nose', 'Mouth', 'L-Lip', 'U-Lip']
-    mask_soft_kernel = 17.0
-    mask_soft_iterations = 7.0
-    age = 25.0
-    blur_amount = 20.0
-    condition = 'All Face'
-    crop_bott = 0.0
-    crop_left = 0.0
-    crop_right = 0.0
-    crop_top = 0.0
-    distance = 0.6
-    enable_face_parser = False
-    enable_laplacian_blend = True
-    #face_enhancer_name = 'GFPGAN'
-    face_enhancer_name = "NONE"
-    face_scale = 1
-
     start_time = time.time()
     total_exec_time = lambda start_time: divmod(time.time() - start_time, 60)
     get_finsh_text = lambda start_time: f"✔️ Completed in {int(total_exec_time(start_time)[0])} min {int(total_exec_time(start_time)[1])} sec."
@@ -410,34 +385,37 @@ with gr.Blocks() as demo:
 if __name__ == "__main__":
     #if BATCH_MODE:
     print("Running batch mode")
+    with open('project.json', 'r') as openfile:
+       project = json.load(openfile)
+
     for i in process(
-        input_type = "Video",
-        video_path = '/home/msk/encfs/faceswap/projects/test1/src-short.webm',
-        image_path = '',
-        source_path = '/home/msk/encfs/faceswap/projects/test1/dst.jpg',
-        directory_path = '',
-        output_path = '/home/msk/encfs/out',
-        output_name = 'Result',
-        keep_output_sequence = False,
-        mask_includes = ['Skin', 'R-Eyebrow', 'L-Eyebrow', 'L-Eye', 'R-Eye', 'Nose', 'Mouth', 'L-Lip', 'U-Lip'],
-        mask_soft_kernel = 17.0,
-        mask_soft_iterations = 7.0,
-        age = 25.0,
-        blur_amount = 20.0,
-        condition = 'All Face',
-        crop_bott = 0.0,
-        crop_left = 0.0,
-        crop_right = 0.0,
-        crop_top = 0.0,
-        distance = 0.6,
-        enable_face_parser = False,
-        enable_laplacian_blend = True,
-        #face_enhancer_name = 'GFPGAN',
-        face_enhancer_name = "NONE",
-        face_scale = 1
+        input_type = project['input_type'],
+        video_path = project['video_path'],
+        image_path = project['image_path'],
+        source_path = project['source_path'],
+        directory_path = project['directory_path'],
+        output_path = project['output_path'],
+        output_name = project['output_name'],
+        keep_output_sequence = project['keep_output_sequence'],
+        # mask_includes = ['Skin', 'R-Eyebrow', 'L-Eyebrow', 'L-Eye', 'R-Eye', 'Nose', 'Mouth', 'L-Lip', 'U-Lip'],
+        mask_includes = project['mask_includes'], #["Skin","L-Eyebrow","R-Eyebrow","L-Eye","R-Eye","Eye-G","L-Ear","R-Ear","Ear-R","Nose","Mouth","U-Lip","L-Lip","Neck","Neck-L","Hair","Hat"]
+        mask_soft_kernel = project['mask_soft_kernel'],
+        mask_soft_iterations = project['mask_soft_iterations'],
+        age = project['age'],
+        blur_amount = project['blur_amount'],
+        condition = project['condition'],
+        crop_bott = project['crop_bott'],
+        crop_left = project['crop_left'],
+        crop_right = project['crop_right'],
+        crop_top = project['crop_top'],
+        distance = project['distance'],
+        enable_face_parser = project['enable_face_parser'],
+        enable_laplacian_blend = project['enable_laplacian_blend'],
+        face_enhancer_name = project['face_enhancer_name'],
+        face_scale = project['face_scale']
     ):
         print("cycle" + str(i))
-        
+
     print("Process end")
 
 

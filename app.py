@@ -15,6 +15,7 @@ import gradio as gr
 from tqdm import tqdm
 import concurrent.futures
 from moviepy.editor import VideoFileClip
+import json
 
 from nsfw_detector import get_nsfw_detector
 from face_swapper import Inswapper, paste_to_whole, place_foreground_on_background
@@ -157,6 +158,36 @@ def process(
     global OUTPUT_FILE
     global PREVIEW
     WORKSPACE, OUTPUT_FILE, PREVIEW = None, None, None
+
+    # todo save variables as "project"
+    proj = {
+        "input_type" : input_type,
+        "image_path": image_path,
+        "video_path": video_path,
+        "directory_path": directory_path,
+        "source_path": source_path,
+        "output_path": output_path,
+        "output_name": output_name,
+        "keep_output_sequence": keep_output_sequence,
+        "condition" :condition,
+        "age": age,
+        "distance": distance,
+        "face_enhancer_name": face_enhancer_name,
+        "enable_face_parser": enable_face_parser,
+        "mask_includes": mask_includes,
+        "mask_soft_kernel": mask_soft_kernel,
+        "mask_soft_iterations": mask_soft_iterations,
+        "blur_amount": blur_amount,
+        "face_scale": face_scale,
+        "enable_laplacian_blend": enable_laplacian_blend,
+        "crop_top" : crop_top,
+        "crop_bott": crop_bott,
+        "crop_left": crop_left,
+        "crop_right": crop_right
+    }
+    with open("project.json", "w") as outfile:
+        outfile.write(json.dumps(proj, indent=4))
+
 
     ## ------------------------------ GUI UPDATE FUNC ------------------------------
 

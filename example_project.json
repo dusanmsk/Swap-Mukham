@@ -1,0 +1,27 @@
+{
+    "input_type": "Video",
+    "image_path": null,
+    "video_path": "src_video.mp4",
+    "directory_path": "",
+    "source_path": "dst_face.png",
+    "output_path": "output/",
+    "output_name": "face1",
+    "keep_output_sequence": false,
+    "condition": "All Face",
+    "age": 25.0,
+    "distance": 0.6,
+    "face_enhancer_name": "NONE",
+    "enable_face_parser": false,
+    "mask_includes": [
+        "Skin","L-Eyebrow","R-Eyebrow","L-Eye","R-Eye","Eye-G","L-Ear","R-Ear","Ear-R","Nose","Mouth","U-Lip","L-Lip","Neck","Neck-L","Hair","Hat"
+    ],
+    "mask_soft_kernel": 17.0,
+    "mask_soft_iterations": 7.0,
+    "blur_amount": 20.0,
+    "face_scale": 1,
+    "enable_laplacian_blend": true,
+    "crop_top": 0.0,
+    "crop_bott": 0.0,
+    "crop_left": 0.0,
+    "crop_right": 0.0
+}
