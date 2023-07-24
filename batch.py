@@ -1,3 +1,6 @@
+
+from concurrent.futures import ThreadPoolExecutor
+import time
 import os
 import cv2
 import glob
@@ -31,6 +34,7 @@ parser.add_argument("--out_dir", help="Default Output directory", default=os.get
 parser.add_argument("--batch_size", help="Gpu batch size", default=32)
 parser.add_argument("--cuda", action="store_true", help="Enable cuda", default=False)
 parser.add_argument("--project", help="Project dir to run in headless batch mode")
+parser.add_argument("--cpu_count", help="Number of CPUs to run video extraction on", default=1)
 parser.add_argument(
     "--colab", action="store_true", help="Enable colab mode", default=False
 )
@@ -43,6 +47,7 @@ USE_COLAB = user_args.colab
 USE_CUDA = user_args.cuda
 DEF_OUTPUT_PATH = user_args.out_dir
 BATCH_SIZE = user_args.batch_size
+CPU_COUNT = int(user_args.cpu_count)
 PROJECT_DIR = user_args.project
 WORKSPACE = None
 OUTPUT_FILE = None
@@ -308,7 +313,9 @@ def process(
         temp_path = os.path.join(output_path, output_name, "sequence")
         os.makedirs(temp_path, exist_ok=True)
 
-        yield "### \n ⌛ Extracting video frames..."
+        yield "### \n ⌛ Extracting video frames... on " + str(CPU_COUNT)
+        save_executor = ThreadPoolExecutor(max_workers=CPU_COUNT)
+        timestart = round(time.time())
         image_sequence = []
         cap = cv2.VideoCapture(video_path)
         curr_idx = 0
@@ -316,11 +323,16 @@ def process(
             ret, frame = cap.read()
             if not ret:break
             frame_path = os.path.join(temp_path, f"frame_{curr_idx}.jpg")
-            cv2.imwrite(frame_path, frame)
+            #cv2.imwrite(frame_path, frame)
+            save_executor.submit(cv2.imwrite, frame_path, frame)    
             image_sequence.append(frame_path)
             curr_idx += 1
         cap.release()
         cv2.destroyAllWindows()
+        save_executor.shutdown()
+        timeend = round(time.time())
+        print ("duration: " + str((timeend - timestart)))
+        
 
         for info_update in swap_process(image_sequence):
             yield info_update
