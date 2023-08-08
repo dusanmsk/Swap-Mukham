@@ -19,6 +19,8 @@ from tqdm import tqdm
 import concurrent.futures
 from moviepy.editor import VideoFileClip
 import json
+import logging
+import sys
 
 from nsfw_detector import get_nsfw_detector
 from face_swapper import Inswapper, paste_to_whole, place_foreground_on_background
@@ -26,29 +28,16 @@ from face_analyser import detect_conditions, get_analysed_data, swap_options_lis
 from face_enhancer import get_available_enhancer_names, load_face_enhancer_model
 from face_parsing import init_parser, swap_regions, mask_regions, mask_regions_to_list, SoftErosion
 from utils import trim_video, StreamerThread, ProcessBar, open_directory, split_list_by_lengths, merge_img_sequence_from_ref
+from utils import measure_time
 
-## ------------------------------ USER ARGS ------------------------------
-
-parser = argparse.ArgumentParser(description="Swap-Mukham Face Swapper")
-parser.add_argument("--out_dir", help="Default Output directory", default=os.getcwd())
-parser.add_argument("--batch_size", help="Gpu batch size", default=32)
-parser.add_argument("--cuda", action="store_true", help="Enable cuda", default=False)
-parser.add_argument("--project", help="Project dir to run in headless batch mode")
-parser.add_argument("--cpu_count", help="Number of CPUs to run video extraction on", default=1)
-parser.add_argument(
-    "--colab", action="store_true", help="Enable colab mode", default=False
-)
-user_args = parser.parse_args()
-print(user_args)
 
 ## ------------------------------ DEFAULTS ------------------------------
 
-USE_COLAB = user_args.colab
-USE_CUDA = user_args.cuda
-DEF_OUTPUT_PATH = user_args.out_dir
-BATCH_SIZE = user_args.batch_size
-CPU_COUNT = int(user_args.cpu_count)
-PROJECT_DIR = user_args.project
+USE_COLAB = False
+USE_CUDA = False    # TODO arg
+BATCH_SIZE = 32 # TODO arg
+CPU_COUNT = os.cpu_count()
+FACE_ANALYSER_THREADS = 8 # TODO param s defaultom
 WORKSPACE = None
 OUTPUT_FILE = None
 CURRENT_FRAME = None
@@ -80,7 +69,6 @@ NSFW_DETECTOR = None
 FACE_ENHANCER_LIST = ["NONE"]
 FACE_ENHANCER_LIST.extend(get_available_enhancer_names())
 
-
 ## ------------------------------ SET EXECUTION PROVIDER ------------------------------
 # Note: Non CUDA users may change settings here
 
@@ -93,7 +81,8 @@ if USE_CUDA:
         PROVIDER = ["CUDAExecutionProvider", "CPUExecutionProvider"]
     else:
         USE_CUDA = False
-        print("\n********** CUDA unavailable running on CPU **********\n")
+        print("\n********** CUDA unavailable **********\n")
+        sys.exit(1)
 else:
     USE_CUDA = False
     print("\n********** Running on CPU **********\n")
@@ -130,11 +119,7 @@ def load_nsfw_detector_model(path="./assets/pretrained_models/nsfwmodel_281.pth"
         NSFW_DETECTOR = get_nsfw_detector(model_path=path, device=device)
 
 
-load_face_analyser_model()
-load_face_swapper_model()
-
 ## ------------------------------ MAIN PROCESS ------------------------------
-
 
 
 def process(
@@ -172,14 +157,14 @@ def process(
     get_finsh_text = lambda start_time: f"✔️ Completed in {int(total_exec_time(start_time)[0])} min {int(total_exec_time(start_time)[1])} sec."
 
     ## ------------------------------ PREPARE INPUTS & LOAD MODELS ------------------------------
-    yield "### \n ⌛ Loading NSFW detector model..."
-    load_nsfw_detector_model()
 
     yield "### \n ⌛ Loading face analyser model..."
     load_face_analyser_model()
+    measure_time("Load 2")
 
     yield "### \n ⌛ Loading face swapper model..."
     load_face_swapper_model()
+    measure_time("Load 3")
 
     if face_enhancer_name != "NONE":
         yield f"### \n ⌛ Loading {face_enhancer_name} model..."
@@ -191,12 +176,16 @@ def process(
         yield "### \n ⌛ Loading face parsing model..."
         load_face_parser_model()
 
+    measure_time("Load 4")
+
     includes = mask_regions_to_list(mask_includes)
     smooth_mask = SoftErosion(kernel_size=17, threshold=0.9, iterations=int(mask_soft_iterations)).to(device) if mask_soft_iterations > 0 else None
     specifics = list(specifics)
     half = len(specifics) // 2
     sources = specifics[:half]
     specifics = specifics[half:]
+
+    measure_time("Measure 1")
 
     ## ------------------------------ ANALYSE & SWAP FUNC ------------------------------
 
@@ -207,6 +196,7 @@ def process(
             source_data = source_path, age
         else:
             source_data = ((sources, specifics), distance)
+            
         analysed_targets, analysed_sources, whole_frame_list, num_faces_per_frame = get_analysed_data(
             FACE_ANALYSER,
             image_sequence,
@@ -215,16 +205,21 @@ def process(
             detect_condition=DETECT_CONDITION,
             scale=face_scale
         )
+        measure_time("Measure 1a")
 
         yield "### \n ⌛ Swapping faces..."
         preds, aimgs, matrs = FACE_SWAPPER.batch_forward(whole_frame_list, analysed_targets, analysed_sources)
         EMPTY_CACHE()
+
+        measure_time("Measure 2")
 
         if enable_face_parser:
             yield "### \n ⌛ Applying face-parsing mask..."
             for idx, (pred, aimg) in tqdm(enumerate(zip(preds, aimgs)), total=len(preds), desc="Face parsing"):
                 preds[idx] = swap_regions(pred, aimg, FACE_PARSER, smooth_mask, includes=includes, blur=int(blur_amount))
         EMPTY_CACHE()
+
+        measure_time("Measure 3")
 
         if face_enhancer_name != "NONE":
             yield f"### \n ⌛ Enhancing faces with {face_enhancer_name}..."
@@ -244,6 +239,8 @@ def process(
         split_matrs = split_list_by_lengths(matrs, num_faces_per_frame)
         del matrs
 
+        measure_time("Measure 4")
+
         yield "### \n ⌛ Post-processing..."
         def post_process(frame_idx, frame_img, split_preds, split_aimgs, split_matrs, enable_laplacian_blend, crop_top, crop_bott, crop_left, crop_right):
             whole_img_path = frame_img
@@ -253,7 +250,7 @@ def process(
             cv2.imwrite(whole_img_path, whole_img)
 
         def concurrent_post_process(image_sequence, split_preds, split_aimgs, split_matrs, enable_laplacian_blend, crop_top, crop_bott, crop_left, crop_right):
-            with concurrent.futures.ThreadPoolExecutor() as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=CPU_COUNT) as executor:
                 futures = []
                 for idx, frame_img in enumerate(image_sequence):
                     future = executor.submit(
@@ -288,7 +285,7 @@ def process(
             crop_left,
             crop_right
         )
-
+        measure_time("Measure 5")
 
 
     ## ------------------------------ IMAGE ------------------------------
@@ -304,8 +301,8 @@ def process(
         OUTPUT_FILE = output_file
         WORKSPACE = output_path
         PREVIEW = cv2.imread(output_file)[:, :, ::-1]
-
-        yield get_finsh_text(start_time), *ui_after()
+        yield
+        #yield get_finsh_text(start_time), *ui_after()
 
     ## ------------------------------ VIDEO ------------------------------
 
@@ -313,24 +310,30 @@ def process(
         temp_path = os.path.join(output_path, output_name, "sequence")
         os.makedirs(temp_path, exist_ok=True)
 
+        measure_time("Before extract")
         yield "### \n ⌛ Extracting video frames... on " + str(CPU_COUNT)
         save_executor = ThreadPoolExecutor(max_workers=CPU_COUNT)
         timestart = round(time.time())
         image_sequence = []
         cap = cv2.VideoCapture(video_path)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         curr_idx = 0
-        while True:
-            ret, frame = cap.read()
-            if not ret:break
-            frame_path = os.path.join(temp_path, f"frame_{curr_idx}.jpg")
-            #cv2.imwrite(frame_path, frame)
-            save_executor.submit(cv2.imwrite, frame_path, frame)    
-            image_sequence.append(frame_path)
-            curr_idx += 1
+        with tqdm(total=total_frames) as pbar:
+            while True:
+                ret, frame = cap.read()
+                if not ret:break
+                curr_idx_str=format(curr_idx, "015")
+                frame_path = os.path.join(temp_path, f"frame_{curr_idx_str}.jpg")
+                save_executor.submit(cv2.imwrite, frame_path, frame)
+                image_sequence.append(frame_path)
+                curr_idx += 1
+                total_frames -= 1
+                pbar.update(1)
         cap.release()
         cv2.destroyAllWindows()
         save_executor.shutdown()
         timeend = round(time.time())
+        measure_time("After extract")
         print ("duration: " + str((timeend - timestart)))
         
 
@@ -339,7 +342,9 @@ def process(
 
         yield "### \n ⌛ Merging sequence..."
         output_video_path = os.path.join(output_path, output_name + ".mp4")
+        measure_time("Merge 1")
         merge_img_sequence_from_ref(video_path, image_sequence, output_video_path)
+        measure_time("Merge2 2")
 
         if os.path.exists(temp_path) and not keep_output_sequence:
             yield "### \n ⌛ Removing temporary files..."
@@ -355,9 +360,7 @@ def process(
     elif input_type == "Directory":
         extensions = ["jpg", "jpeg", "png", "bmp", "tiff", "ico", "webp"]
         temp_path = os.path.join(output_path, output_name)
-        if os.path.exists(temp_path):
-            shutil.rmtree(temp_path)
-        os.mkdir(temp_path)
+        os.makedirs(temp_path,exist_ok=True)
 
         file_paths =[]
         for file_path in glob.glob(os.path.join(directory_path, "*")):
@@ -390,25 +393,9 @@ def stop_running():
         STREAMER = None
     return "Cancelled"
 
-# with gr.Blocks() as demo:
-#     greet_btn = gr.Button("Greet")
-#     greet_btn.click(fn=process, inputs=None, outputs=None, api_name="greet")
-
-def fixProjectPaths(p):
-    for i in ['video_path', 'source_path', 'output_path']:
-        if not os.path.isabs(p[i]):
-            p[i] = os.path.join(PROJECT_DIR, p[i])
-    return p
 
 
-if __name__ == "__main__":
-    print("Running project ${PROJECT_DIR} in batch mode")
-
-    # read project file
-    with open(os.path.join(PROJECT_DIR, 'project.json'), 'r') as openfile:
-       project = json.load(openfile)
-
-    project = fixProjectPaths(project)
+def runProject(project):
     print("Running project: " + json.dumps(project, indent=4, sort_keys=True))
 
     for i in process(
@@ -420,8 +407,7 @@ if __name__ == "__main__":
         output_path = project['output_path'],
         output_name = project['output_name'],
         keep_output_sequence = project['keep_output_sequence'],
-        # mask_includes = ['Skin', 'R-Eyebrow', 'L-Eyebrow', 'L-Eye', 'R-Eye', 'Nose', 'Mouth', 'L-Lip', 'U-Lip'],
-        mask_includes = project['mask_includes'], #["Skin","L-Eyebrow","R-Eyebrow","L-Eye","R-Eye","Eye-G","L-Ear","R-Ear","Ear-R","Nose","Mouth","U-Lip","L-Lip","Neck","Neck-L","Hair","Hat"]
+        mask_includes = project['mask_includes'],
         mask_soft_kernel = project['mask_soft_kernel'],
         mask_soft_iterations = project['mask_soft_iterations'],
         age = project['age'],
@@ -441,6 +427,3 @@ if __name__ == "__main__":
 
     print("Process end")
 
-
-if __name__ == "__mainA__":
-    demo.launch()

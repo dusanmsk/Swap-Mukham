@@ -1,4 +1,7 @@
-import os
+import copy
+from concurrent.futures import ThreadPoolExecutor
+import os, tempfile
+import shutil
 import cv2
 import glob
 import time
@@ -37,6 +40,9 @@ user_args = parser.parse_args()
 
 ## ------------------------------ DEFAULTS ------------------------------
 
+ARCHIVE_DIR = "archive"
+CURRENT_PREVIEW_FRAME = None
+LAST_ARCHIVED_FILE_TIMESTAMP = 0
 USE_COLAB = user_args.colab
 USE_CUDA = user_args.cuda
 DEF_OUTPUT_PATH = user_args.out_dir
@@ -72,6 +78,8 @@ NSFW_DETECTOR = None
 FACE_ENHANCER_LIST = ["NONE"]
 FACE_ENHANCER_LIST.extend(get_available_enhancer_names())
 
+
+os.makedirs(ARCHIVE_DIR, exist_ok=True)
 
 ## ------------------------------ SET EXECUTION PROVIDER ------------------------------
 # Note: Non CUDA users may change settings here
@@ -127,6 +135,40 @@ load_face_swapper_model()
 
 ## ------------------------------ MAIN PROCESS ------------------------------
 
+def archive( 
+    input_type,
+    image_path,
+    video_path,
+    directory_path,
+    source_path,
+    output_path,
+    output_name,
+    keep_output_sequence,
+    condition,
+    age,
+    distance,
+    face_enhancer_name,
+    enable_face_parser,
+    mask_includes,
+    mask_soft_kernel,
+    mask_soft_iterations,
+    blur_amount,
+    face_scale,
+    enable_laplacian_blend,
+    crop_top,
+    crop_bott,
+    crop_left,
+    crop_right,
+    *specifics,):
+    global LAST_ARCHIVED_FILE_TIMESTAMP
+    result_file_name = os.path.join(output_path, output_name + ".png")
+    # todo viem nejak zistit meno zdrojoveho suboru ked ho dragdropujem?
+    archive_file_name = os.path.join(ARCHIVE_DIR, str(time.time()).replace(".", "_") + ".png")
+    result_timestamp = os.path.getmtime(result_file_name)
+    if (result_timestamp != LAST_ARCHIVED_FILE_TIMESTAMP):
+        shutil.copy(result_file_name, archive_file_name)
+        LAST_ARCHIVED_FILE_TIMESTAMP = result_timestamp
+    return "Ok"
 
 def process(
     input_type,
@@ -219,11 +261,9 @@ def process(
     total_exec_time = lambda start_time: divmod(time.time() - start_time, 60)
     get_finsh_text = lambda start_time: f"✔️ Completed in {int(total_exec_time(start_time)[0])} min {int(total_exec_time(start_time)[1])} sec."
 
-    print (locals())
-
     ## ------------------------------ PREPARE INPUTS & LOAD MODELS ------------------------------
-    yield "### \n ⌛ Loading NSFW detector model...", *ui_before()
-    load_nsfw_detector_model()
+    #yield "### \n ⌛ Loading NSFW detector model...", *ui_before()
+    #load_nsfw_detector_model()
 
     yield "### \n ⌛ Loading face analyser model...", *ui_before()
     load_face_analyser_model()
@@ -373,17 +413,21 @@ def process(
 
         yield "### \n ⌛ Extracting video frames...", *ui_before()
         image_sequence = []
+        save_executor = ThreadPoolExecutor()
         cap = cv2.VideoCapture(video_path)
         curr_idx = 0
         while True:
             ret, frame = cap.read()
             if not ret:break
-            frame_path = os.path.join(temp_path, f"frame_{curr_idx}.jpg")
-            cv2.imwrite(frame_path, frame)
+            curr_idx_str=format(curr_idx, "015")
+            frame_path = os.path.join(temp_path, f"frame_{curr_idx_str}.jpg")
+            save_executor.submit(cv2.imwrite, frame_path, frame)    
+            #cv2.imwrite(frame_path, frame)
             image_sequence.append(frame_path)
             curr_idx += 1
         cap.release()
         cv2.destroyAllWindows()
+        save_executor.shutdown()
 
         for info_update in swap_process(image_sequence):
             yield info_update
@@ -533,6 +577,7 @@ def stop_running():
 
 
 def slider_changed(show_frame, video_path, frame_index):
+    global CURRENT_PREVIEW_FRAME
     if not show_frame:
         return None, None
     if video_path is None:
@@ -540,6 +585,7 @@ def slider_changed(show_frame, video_path, frame_index):
     clip = VideoFileClip(video_path)
     frame = clip.get_frame(frame_index / clip.fps)
     frame_array = np.array(frame)
+    CURRENT_PREVIEW_FRAME = frame
     clip.close()
     return gr.Image.update(value=frame_array, visible=True), gr.Video.update(
         visible=False
@@ -555,6 +601,52 @@ def trim_and_reload(video_path, output_path, output_name, start_frame, stop_fram
     except Exception as e:
         print(e)
         yield video_path, "### \n ❌ Video trimming failed. See console for more info."
+
+
+
+def preview(preview_image):
+    global CURRENT_PREVIEW_FRAME
+    output_file = "/tmp/prev.jpg"
+    cv2.imwrite(output_file, CURRENT_PREVIEW_FRAME)
+
+    source_data = output_file, age
+    analysed_targets, analysed_sources, whole_frame_list, num_faces_per_frame = get_analysed_data(
+        FACE_ANALYSER,
+        [output_file],
+        source_data
+    )
+    preds, aimgs, matrs = FACE_SWAPPER.batch_forward(whole_frame_list, analysed_targets, analysed_sources)
+    EMPTY_CACHE()
+    split_preds = split_list_by_lengths(preds, num_faces_per_frame)
+    split_aimgs = split_list_by_lengths(aimgs, num_faces_per_frame)
+    split_matrs = split_list_by_lengths(matrs, num_faces_per_frame)
+
+    def post_process(frame_idx, frame_img, split_preds, split_aimgs, split_matrs, enable_laplacian_blend, crop_top,
+                     crop_bott, crop_left, crop_right):
+        whole_img_path = frame_img
+        whole_img = cv2.imread(whole_img_path)
+        for p, a, m in zip(split_preds[frame_idx], split_aimgs[frame_idx], split_matrs[frame_idx]):
+            whole_img = paste_to_whole(p, a, m, whole_img, laplacian_blend=enable_laplacian_blend,
+                                       crop_mask=(crop_top, crop_bott, crop_left, crop_right))
+        cv2.imwrite(whole_img_path, whole_img)
+
+    for idx, frame_img in enumerate([output_file]):
+            post_process (
+            idx,
+            frame_img,
+            split_preds,
+            split_aimgs,
+            split_matrs,
+            False,
+            0,
+            0,
+            0,
+            0
+        )
+
+    x = cv2.imread(output_file)[:, :, ::-1]
+    return gr.Image.update(value=x, visible=True)
+
 
 
 ## ------------------------------ GRADIO GUI ------------------------------
@@ -761,6 +853,8 @@ with gr.Blocks(css=css) as interface:
 
                 with gr.Row():
                     swap_button = gr.Button("✨ Swap", variant="primary")
+                    preview_button = gr.Button("Preview")
+                    archive_button = gr.Button("✨ Archive")
                     cancel_button = gr.Button("⛔ Cancel")
 
                 preview_image = gr.Image(label="Output", interactive=False)
@@ -883,6 +977,15 @@ with gr.Blocks(css=css) as interface:
     swap_event = swap_button.click(
         fn=process, inputs=swap_inputs, outputs=swap_outputs, show_progress=True
     )
+
+    archive_event = archive_button.click(
+        fn=archive, inputs=swap_inputs, outputs=None, show_progress=False
+    )
+
+    preview_event = preview_button.click(
+        fn=preview, inputs=preview_image, outputs=preview_image, show_progress=False
+    )
+
 
     cancel_button.click(
         fn=stop_running,

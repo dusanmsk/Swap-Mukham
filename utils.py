@@ -10,6 +10,7 @@ import numpy as np
 from threading import Thread
 from moviepy.editor import VideoFileClip, ImageSequenceClip
 from moviepy.video.io.ffmpeg_tools import ffmpeg_extract_subclip
+import logging
 
 
 logo_image = cv2.imread("./assets/images/logo.png", cv2.IMREAD_UNCHANGED)
@@ -170,8 +171,8 @@ def split_list_by_lengths(data, length_list):
         start_idx = end_idx
     return split_data
 
-
 def merge_img_sequence_from_ref(ref_video_path, image_sequence, output_file_name):
+
     video_clip = VideoFileClip(ref_video_path)
     fps = video_clip.fps
     duration = video_clip.duration
@@ -184,8 +185,15 @@ def merge_img_sequence_from_ref(ref_video_path, image_sequence, output_file_name
 
     bitrate = get_bitrate_for_resolution(min(*edited_video_clip.size), "high")
 
+    # todo replace with ffmpeg call
+    # merge frames
+    # ffmpeg -framerate $fps -pattern_type glob -i "frame*.jpg" -c:v libx264 -b:v $bitrate -pix_fmt yuv420p out.mp4
+    # merge audio (merges video from first file and audio from second file)
+    # ffmpeg -i out.mp4 -i original_source.mp4 -c copy -map 0:v:0 -map 1:a:0 -shortest out2.mp4
+
+
     edited_video_clip.set_duration(duration).write_videofile(
-        output_file_name, codec="libx264", bitrate=bitrate,
+        output_file_name, codec="libx264", bitrate=bitrate, threads=os.cpu_count()
     )
     edited_video_clip.close()
     video_clip.close()
@@ -282,3 +290,12 @@ def make_white_image(shape, crop=None, white_value=255):
             if right > 0: img_white[:, -right:] = 0
 
     return img_white
+
+
+CURRENT_MEASURE_TIMESTAMP = time.time()
+
+def measure_time(name):
+    global CURRENT_MEASURE_TIMESTAMP
+    logging.info(f"Measure of {name} ended with duration {str(time.time() - CURRENT_MEASURE_TIMESTAMP)} seconds")
+    CURRENT_MEASURE_TIMESTAMP = time.time()
+

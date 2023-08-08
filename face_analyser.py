@@ -78,7 +78,7 @@ def cosine_distance(a, b):
     return 1 - np.dot(a, b)
 
 
-def get_analysed_data(face_analyser, image_sequence, source_data, swap_condition="All face", detect_condition="left most", scale=1.0):
+def get_analysed_data(face_analyser, image_sequence, source_data, swap_condition="All Face", detect_condition="Left Most", scale=1.0):
     if swap_condition != "Specific Face":
         source_path, age = source_data
         source_image = cv2.imread(source_path)
