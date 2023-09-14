@@ -3,7 +3,7 @@ set -ie
 
 
 apt-get update && apt-get -y install build-essential python3-opencv  software-properties-common && apt-add-repository contrib && apt-add-repository non-free && apt-get update
-apt-get -y install megatools byobu rclone nano vim mc nvtop
+apt-get -y install megatools byobu rclone nano vim mc nvtop yt-dlp
 apt-get -y clean
 
 conda create -n swap python=3.10 -y
